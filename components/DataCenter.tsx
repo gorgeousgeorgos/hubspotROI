@@ -38,8 +38,8 @@ const DataCenter: React.FC<DataCenterProps> = ({ stats, setStats, campaigns, use
       await new Promise(r => setTimeout(r, 1000));
       addLog("Re-calculating True ROI vectors for all link DNA...");
       
-      // Fixed: passed userId to satisfy nativeStorage.saveStats arguments requirement
-      nativeStorage.saveStats(userId, stats);
+      // Persist stats to Supabase
+      await nativeStorage.saveStats(userId, stats);
       addLog("Local state synced to native persistent storage.");
       
       setLastSync(new Date().toLocaleTimeString());
@@ -56,14 +56,19 @@ const DataCenter: React.FC<DataCenterProps> = ({ stats, setStats, campaigns, use
     setEditValues(stat);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editingId) return;
-    const updated = stats.map(s => s.id === editingId ? { ...s, ...editValues, is_manual_override: true } : s);
-    setStats(updated);
-    // Fixed: passed userId to satisfy nativeStorage.saveStats arguments requirement
-    nativeStorage.saveStats(userId, updated); // Native persistence
-    setEditingId(null);
-    addLog(`Manual override applied to campaign stat ${editingId}`);
+    try {
+      const updated = stats.map(s => s.id === editingId ? { ...s, ...editValues, is_manual_override: true } : s);
+      setStats(updated);
+      // Persist change
+      await nativeStorage.saveStats(userId, updated);
+      setEditingId(null);
+      addLog(`Manual override applied to campaign stat ${editingId}`);
+    } catch (err) {
+      console.error('DataCenter save failed', err);
+      addLog('ERROR: Failed to persist manual override.');
+    }
   };
 
   const filteredStats = stats.filter(s => 

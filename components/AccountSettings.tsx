@@ -3,7 +3,9 @@ import React, { useState } from 'react';
 import { 
   Mail, CheckCircle2, Link2, Zap, ArrowRight, ShieldCheck, CreditCard, Star, Code, Copy, Check, Globe, X, RefreshCw, Lock, ChevronRight, Key, Eye, EyeOff, Save
 } from 'lucide-react';
+import { useClerk } from '@clerk/clerk-react';
 import { Settings, IntegrationCredentials } from '../types';
+import SchedulerRuns from './SchedulerRuns';
 
 interface SettingsProps {
   settings: Settings;
@@ -17,14 +19,17 @@ const AccountSettings: React.FC<SettingsProps> = ({ settings, setSettings }) => 
   const [showKeys, setShowKeys] = useState(false);
   const isPro = settings.subscription.plan === 'PRO';
 
-  const pixelSnippet = `<!-- Foundry Attribution Pixel -->
+  const backendEndpoint = settings.custom_domain ? `https://${settings.custom_domain}/api/pixel` : 'https://your-backend.example.com/api/pixel';
+
+  const pixelSnippet = `<!-- Foundry Attribution Pixel - Paste on your site -->
 <script>
-  (function(f,o,u,n,d,r,y){
-    f['FoundryObject']=d;f[d]=f[d]||function(){(f[d].q=f[d].q||[]).push(arguments)},
-    f[d].l=1*new Date();r=o.createElement(u),y=o.getElementsByTagName(u)[0];
-    r.async=1;r.src=n;y.parentNode.insertBefore(r,y)
-  })(window,document,'script','https://cdn.foundry.io/pixel.js','fnd');
-  fnd('init', '${settings.custom_domain ? settings.custom_domain : Math.random().toString(36).substr(2, 9)}');
+(function(){
+  // Sends a POST to the foundry backend with the email field when a form is submitted.
+  // Ensure cookies are preserved (same-site & CORS) so the campaign tracking cookie can be included.
+  function extractEmail(form){ const el = form.querySelector('input[type="email"]'); return el ? el.value : null; }
+  async function sendLead(email){ if(!email) return; try{ await fetch('${backendEndpoint}', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }); } catch (e){ console.warn('Foundry pixel failed', e); } }
+  document.addEventListener('submit', function(e){ try{ const email = extractEmail(e.target); if(email) sendLead(email); } catch (err) {} }, true);
+})();
 </script>`;
 
   const copyPixel = () => {
@@ -123,6 +128,10 @@ const AccountSettings: React.FC<SettingsProps> = ({ settings, setSettings }) => 
               <p className="text-[11px] text-slate-500 font-bold italic mb-8 uppercase tracking-widest leading-relaxed">Permanently flush your attribution history and disconnect all active CRM bridges.</p>
               <button className="w-full py-4 bg-red-600/10 hover:bg-red-600 text-red-400 hover:text-white rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all border border-red-500/20">Purge Workspace</button>
             </div>
+
+            <div className="mt-6">
+              <SchedulerRuns />
+            </div>
           </div>
         </div>
       )}
@@ -154,6 +163,9 @@ const AccountSettings: React.FC<SettingsProps> = ({ settings, setSettings }) => 
                     onChange={e => updateIntegration('hubspot', { accessToken: e.target.value })}
                   />
                   <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest italic leading-relaxed">Required scopes: crm.objects.deals.read, analytics.readonly</p>
+                  {settings.integrations?.hubspot?.portalId && (
+                    <div className="mt-4 text-sm text-slate-400">Portal ID: <span className="font-mono text-white">{settings.integrations.hubspot.portalId}</span></div>
+                  )}
                 </div>
               )}
            </div>

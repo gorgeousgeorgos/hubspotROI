@@ -1,57 +1,61 @@
 
 import { Campaign, Stat, MarketingAsset, Deal, Settings } from '../types';
+import { supabase } from '../src/services/supabaseClient';
 
 /**
- * Foundry Native Storage Service
- * Namespaced by userId to ensure multi-tenancy.
+ * Supabase-backed storage service (replaces localStorage)
+ * All functions are async and require a userId for multi-tenancy.
  */
 
-const getKeys = (userId: string) => ({
-  CAMPAIGNS: `fnd_${userId}_campaigns`,
-  STATS: `fnd_${userId}_stats`,
-  ASSETS: `fnd_${userId}_assets`,
-  DEALS: `fnd_${userId}_deals`,
-  SETTINGS: `fnd_${userId}_settings`
-});
-
 export const nativeStorage = {
-  saveCampaigns: (userId: string, data: Campaign[]) => {
-    localStorage.setItem(getKeys(userId).CAMPAIGNS, JSON.stringify(data));
+  saveCampaigns: async (userId: string, data: Campaign[]) => {
+    // upsert campaigns, ensure user_id is set
+    const payload = data.map(d => ({ ...d, user_id: userId }));
+    await supabase.from('campaigns').upsert(payload, { onConflict: 'id' });
   },
-  getCampaigns: (userId: string): Campaign[] | null => {
-    const data = localStorage.getItem(getKeys(userId).CAMPAIGNS);
-    return data ? JSON.parse(data) : null;
-  },
-
-  saveStats: (userId: string, data: Stat[]) => {
-    localStorage.setItem(getKeys(userId).STATS, JSON.stringify(data));
-  },
-  getStats: (userId: string): Stat[] | null => {
-    const data = localStorage.getItem(getKeys(userId).STATS);
-    return data ? JSON.parse(data) : null;
+  getCampaigns: async (userId: string): Promise<Campaign[] | null> => {
+    const { data, error } = await supabase.from('campaigns').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data as Campaign[]) || null;
   },
 
-  saveAssets: (userId: string, data: MarketingAsset[]) => {
-    localStorage.setItem(getKeys(userId).ASSETS, JSON.stringify(data));
+  saveStats: async (userId: string, data: Stat[]) => {
+    const payload = data.map(d => ({ ...d, user_id: userId }));
+    await supabase.from('stats').upsert(payload, { onConflict: 'id' });
   },
-  getAssets: (userId: string): MarketingAsset[] | null => {
-    const data = localStorage.getItem(getKeys(userId).ASSETS);
-    return data ? JSON.parse(data) : null;
-  },
-
-  saveDeals: (userId: string, data: Deal[]) => {
-    localStorage.setItem(getKeys(userId).DEALS, JSON.stringify(data));
-  },
-  getDeals: (userId: string): Deal[] | null => {
-    const data = localStorage.getItem(getKeys(userId).DEALS);
-    return data ? JSON.parse(data) : null;
+  getStats: async (userId: string): Promise<Stat[] | null> => {
+    const { data, error } = await supabase.from('stats').select('*').eq('user_id', userId);
+    if (error) throw error;
+    return (data as Stat[]) || null;
   },
 
-  saveSettings: (userId: string, data: Settings) => {
-    localStorage.setItem(getKeys(userId).SETTINGS, JSON.stringify(data));
+  saveAssets: async (userId: string, data: MarketingAsset[]) => {
+    const payload = data.map(d => ({ ...d, user_id: userId }));
+    await supabase.from('assets').upsert(payload, { onConflict: 'id' });
   },
-  getSettings: (userId: string): Settings | null => {
-    const data = localStorage.getItem(getKeys(userId).SETTINGS);
-    return data ? JSON.parse(data) : null;
+  getAssets: async (userId: string): Promise<MarketingAsset[] | null> => {
+    const { data, error } = await supabase.from('assets').select('*').eq('user_id', userId);
+    if (error) throw error;
+    return (data as MarketingAsset[]) || null;
+  },
+
+  saveDeals: async (userId: string, data: Deal[]) => {
+    const payload = data.map(d => ({ ...d, user_id: userId }));
+    await supabase.from('deals').upsert(payload, { onConflict: 'id' });
+  },
+  getDeals: async (userId: string): Promise<Deal[] | null> => {
+    const { data, error } = await supabase.from('deals').select('*').eq('user_id', userId);
+    if (error) throw error;
+    return (data as Deal[]) || null;
+  },
+
+  saveSettings: async (userId: string, data: Settings) => {
+    const payload = { ...data, user_id: userId } as any;
+    await supabase.from('settings').upsert(payload, { onConflict: 'user_id' });
+  },
+  getSettings: async (userId: string): Promise<Settings | null> => {
+    const { data, error } = await supabase.from('settings').select('*').eq('user_id', userId).single();
+    if (error && error.code !== 'PGRST116') throw error; // not found
+    return (data as Settings) || null;
   }
 };

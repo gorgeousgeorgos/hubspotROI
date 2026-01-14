@@ -2,8 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Brain, Zap, Target, ShieldCheck, Lock, RefreshCw, BarChart3, TrendingUp, AlertTriangle, ChevronRight, Download, Calendar, History } from 'lucide-react';
 import { CampaignWithStats, Settings, IntelligenceReport } from '../types';
-import { getIntelligenceReport } from '../services/geminiService';
 import { Link } from 'react-router-dom';
+import { useAuth } from '@clerk/clerk-react';
 
 interface AdvisorProps {
   campaigns: CampaignWithStats[];
@@ -16,12 +16,27 @@ const Advisor: React.FC<AdvisorProps> = ({ campaigns, settings, onUpdateSettings
   const [loading, setLoading] = useState(false);
   const isPro = settings.subscription.plan === 'PRO';
 
+  const { getToken } = useAuth();
+
   const fetchInsights = async () => {
     setLoading(true);
     try {
-      const result = await getIntelligenceReport(campaigns);
+      // Acquire Clerk session token and post campaigns to server-side intelligence endpoint
+      const token = await getToken({ template: "integration" });
+      const res = await fetch('/api/advisor/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ campaigns })
+      });
+
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to generate intelligence');
+      const result = await res.json();
+
       setReport(result);
-      
+
       // Persist the report so we don't have to re-fetch immediately on next visit
       if (onUpdateSettings) {
         onUpdateSettings({
@@ -29,7 +44,7 @@ const Advisor: React.FC<AdvisorProps> = ({ campaigns, settings, onUpdateSettings
           last_report_generated: new Date().toISOString()
         });
       }
-      
+
       // Save full report content to a separate local storage for persistence
       localStorage.setItem(`fnd_latest_report_${settings.report_email}`, JSON.stringify(result));
     } catch (err) {

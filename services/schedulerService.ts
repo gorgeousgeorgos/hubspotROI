@@ -7,15 +7,15 @@ import { getIntelligenceReport } from './geminiService';
  * Simulates Sunday 09:00 AM report generation logic.
  */
 
-export const generateWeeklyIntelligence = async (campaigns: CampaignWithStats[]): Promise<IntelligenceReport> => {
+export const generateWeeklyIntelligence = async (campaigns: CampaignWithStats[], token?: string): Promise<IntelligenceReport> => {
   console.log("Foundry Scheduler: Initiating Weekly ROI Audit...");
 
   // ROI Benchmarks for recommendations
   const winners = campaigns.filter(c => c.trueRoi > 3.0);
   const drainers = campaigns.filter(c => c.trueRoi < 1.2 && c.totalTrueCost > 0);
 
-  // Call the Gemini-powered intelligence engine
-  const report = await getIntelligenceReport(campaigns);
+  // Call the server-side intelligence engine (token required for auth)
+  const report = await getIntelligenceReport(campaigns, token);
 
   return {
     ...report,

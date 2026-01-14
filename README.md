@@ -10,11 +10,26 @@ View your app in AI Studio: https://ai.studio/apps/drive/1ZxmOIEqa_4PMfzpvw8xSY8
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
-
+**Prerequisites:**  Node.js, Postgres (or Supabase)
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Create the database schema:
+   - If starting fresh: run `psql $DATABASE_URL -f init_db.sql` (or use Supabase SQL runner)
+   - If upgrading an existing DB: add the `revenue` column: `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0;`
+3. Set required env vars in `.env.local` (example below)
+
+4. Run the app:
    `npm run dev`
+
+
+Required environment variables (example):
+
+```
+DATABASE_URL=postgres://user:pass@localhost:5432/dbname
+CLERK_SECRET_KEY=your_clerk_secret
+VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable
+VITE_SUPABASE_URL=https://xyz.supabase.co
+VITE_SUPABASE_ANON_KEY=public-anon-key
+HUBSPOT_ACCESS_TOKEN=owner_fallback_token
+```

@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn, useAuth, useSignOut } from '@clerk/clerk-react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -31,111 +32,106 @@ import Advisor from './components/Advisor';
 import DataCenter from './components/DataCenter';
 import { checkShouldRunReport, generateWeeklyIntelligence } from './services/schedulerService';
 
-const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem('foundry_auth') === 'true';
-  });
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('foundry_user');
-    return saved ? JSON.parse(saved) : null;
-  });
-  
-  const userId = currentUser?.id || 'guest';
+const ClerkWrapper: React.FC<{children: React.ReactNode}> = ({ children }) => {
+  const clerkPubKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || process.env.VITE_CLERK_PUBLISHABLE_KEY;
+  return <ClerkProvider publishableKey={clerkPubKey as string}>{children}</ClerkProvider>;
+};
 
-  const [campaigns, setCampaigns] = useState<Campaign[]>(() => nativeStorage.getCampaigns(userId) || INITIAL_CAMPAIGNS);
-  const [assets, setAssets] = useState<MarketingAsset[]>(() => nativeStorage.getAssets(userId) || INITIAL_ASSETS);
-  const [stats, setStats] = useState<Stat[]>(() => nativeStorage.getStats(userId) || INITIAL_STATS);
-  const [deals, setDeals] = useState<Deal[]>(() => nativeStorage.getDeals(userId) || INITIAL_DEALS);
-  const [settings, setSettings] = useState<Settings>(() => nativeStorage.getSettings(userId) || INITIAL_SETTINGS);
-  
+const AppInner: React.FC = () => {
+  const { userId, isSignedIn } = useAuth();
+  const uid = userId || '';
+
+  const [campaigns, setCampaigns] = useState<Campaign[]>(INITIAL_CAMPAIGNS);
+  const [assets, setAssets] = useState<MarketingAsset[]>(INITIAL_ASSETS);
+  const [stats, setStats] = useState<Stat[]>(INITIAL_STATS);
+  const [deals, setDeals] = useState<Deal[]>(INITIAL_DEALS);
+  const [settings, setSettings] = useState<Settings>(INITIAL_SETTINGS);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const { signOut } = useSignOut();
 
-  // Persistence Effects
-  useEffect(() => {
-    if (isAuthenticated && currentUser) {
-      nativeStorage.saveCampaigns(userId, campaigns);
-    }
-  }, [campaigns, userId, isAuthenticated, currentUser]);
+  const handleLogout = async () => { try { await signOut(); } catch (e) { console.error('Sign out failed', e); } };
 
+  // Load persisted data for signed-in user
   useEffect(() => {
-    if (isAuthenticated && currentUser) {
-      nativeStorage.saveAssets(userId, assets);
-    }
-  }, [assets, userId, isAuthenticated, currentUser]);
-
-  useEffect(() => {
-    if (isAuthenticated && currentUser) {
-      nativeStorage.saveStats(userId, stats);
-    }
-  }, [stats, userId, isAuthenticated, currentUser]);
-
-  useEffect(() => {
-    if (isAuthenticated && currentUser) {
-      nativeStorage.saveDeals(userId, deals);
-    }
-  }, [deals, userId, isAuthenticated, currentUser]);
-
-  useEffect(() => {
-    if (isAuthenticated && currentUser) {
-      nativeStorage.saveSettings(userId, settings);
-    }
-  }, [settings, userId, isAuthenticated, currentUser]);
-
-  // Sunday Scheduler Mock
-  useEffect(() => {
-    if (isAuthenticated && settings.subscription.plan === 'PRO') {
-      if (checkShouldRunReport(settings.last_report_generated)) {
-        console.log("Sunday detected. Triggering automated ROI audit...");
-        // This would normally be handled by the Advisor or a background worker
+    async function load() {
+      if (!isSignedIn || !uid) return;
+      try {
+        const [camps, as, st, dl, stgs] = await Promise.all([
+          nativeStorage.getCampaigns(uid),
+          nativeStorage.getAssets(uid),
+          nativeStorage.getStats(uid),
+          nativeStorage.getDeals(uid),
+          nativeStorage.getSettings(uid)
+        ]);
+        if (camps) setCampaigns(camps as Campaign[]);
+        if (as) setAssets(as as MarketingAsset[]);
+        if (st) setStats(st as Stat[]);
+        if (dl) setDeals(dl as Deal[]);
+        if (stgs) setSettings(stgs as Settings);
+      } catch (err) {
+        console.error('Failed to load persisted data', err);
       }
     }
-  }, [isAuthenticated, settings]);
+    load();
+  }, [isSignedIn, uid]);
 
-  const handleLogin = (email: string) => {
-    const user: User = {
-      id: btoa(email), // simple hash for ID
-      email,
-      name: email.split('@')[0],
-      organization: 'Foundry Growth'
-    };
-    localStorage.setItem('foundry_auth', 'true');
-    localStorage.setItem('foundry_user', JSON.stringify(user));
-    setCurrentUser(user);
-    setIsAuthenticated(true);
-    
-    // Load that user's specific data
-    setCampaigns(nativeStorage.getCampaigns(user.id) || INITIAL_CAMPAIGNS);
-    setAssets(nativeStorage.getAssets(user.id) || INITIAL_ASSETS);
-    setStats(nativeStorage.getStats(user.id) || INITIAL_STATS);
-    setDeals(nativeStorage.getDeals(user.id) || INITIAL_DEALS);
-    setSettings(nativeStorage.getSettings(user.id) || INITIAL_SETTINGS);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('foundry_auth');
-    localStorage.removeItem('foundry_user');
-    setIsAuthenticated(false);
-    setCurrentUser(null);
-  };
+  // Persist changes
+  useEffect(() => { if (!isSignedIn || !uid) return; const save = async () => { try { await nativeStorage.saveCampaigns(uid, campaigns); } catch (e) { console.error(e); } }; save(); }, [campaigns, isSignedIn, uid]);
+  useEffect(() => { if (!isSignedIn || !uid) return; const save = async () => { try { await nativeStorage.saveAssets(uid, assets); } catch (e) { console.error(e); } }; save(); }, [assets, isSignedIn, uid]);
+  useEffect(() => { if (!isSignedIn || !uid) return; const save = async () => { try { await nativeStorage.saveStats(uid, stats); } catch (e) { console.error(e); } }; save(); }, [stats, isSignedIn, uid]);
+  useEffect(() => { if (!isSignedIn || !uid) return; const save = async () => { try { await nativeStorage.saveDeals(uid, deals); } catch (e) { console.error(e); } }; save(); }, [deals, isSignedIn, uid]);
+  useEffect(() => { if (!isSignedIn || !uid) return; const save = async () => { try { await nativeStorage.saveSettings(uid, settings); } catch (e) { console.error(e); } }; save(); }, [settings, isSignedIn, uid]);
 
   const getCampaignsWithStats = (): CampaignWithStats[] => {
-    return campaigns.map(c => {
-      const campaignStats = stats.filter(s => s.campaign_id === c.id || s.campaign_id === c.name);
-      const totalRevenue = campaignStats.reduce((acc, s) => acc + s.revenue, 0);
-      const totalConversions = campaignStats.reduce((acc, s) => acc + s.conversions, 0);
-      const totalAdSpend = campaignStats.reduce((acc, s) => acc + s.ad_spend, 0);
-      
+    // Build a map keyed by tracking_id (preferred), falling back to id or name
+    const map = new Map<string, Campaign & { totalRevenue?: number; totalConversions?: number; totalAdSpend?: number }>();
+
+    for (const c of campaigns) {
+      const key = c.tracking_id || c.id || c.name;
+      map.set(key, { ...c, totalRevenue: 0, totalConversions: 0, totalAdSpend: 0 });
+    }
+
+    for (const s of stats) {
+      // stat.campaign_id may contain tracking_id, campaign name, or campaign id
+      const keyCandidates = [s.campaign_id];
+      let matched = false;
+      for (const key of keyCandidates) {
+        if (!key) continue;
+        if (map.has(key)) {
+          const entry = map.get(key)!;
+          entry.totalRevenue = (entry.totalRevenue || 0) + s.revenue;
+          entry.totalConversions = (entry.totalConversions || 0) + s.conversions;
+          entry.totalAdSpend = (entry.totalAdSpend || 0) + s.ad_spend;
+          matched = true;
+          break;
+        }
+      }
+
+      if (!matched) {
+        // Last resort: try to match by campaign name
+        for (const [k, entry] of map.entries()) {
+          if (entry.name === s.campaign_id) {
+            entry.totalRevenue = (entry.totalRevenue || 0) + s.revenue;
+            entry.totalConversions = (entry.totalConversions || 0) + s.conversions;
+            entry.totalAdSpend = (entry.totalAdSpend || 0) + s.ad_spend;
+            break;
+          }
+        }
+      }
+    }
+
+    // Compose CampaignWithStats list from the map
+    return Array.from(map.values()).map(c => {
       const campaignAssets = assets.filter(a => c.asset_ids.includes(a.id));
       const totalProductionCost = campaignAssets.reduce((acc, a) => acc + a.cost_amount, 0);
-      
-      const totalTrueCost = totalAdSpend + totalProductionCost;
-      const trueRoi = totalTrueCost > 0 ? (totalRevenue - totalTrueCost) / totalTrueCost : 0;
-      
+      const totalTrueCost = (c.totalAdSpend || 0) + totalProductionCost;
+      const trueRoi = totalTrueCost > 0 ? ((c.totalRevenue || 0) - totalTrueCost) / totalTrueCost : 0;
+
       return {
-        ...c,
-        totalRevenue,
-        totalConversions,
-        totalAdSpend,
+        ...(c as Campaign),
+        totalRevenue: c.totalRevenue || 0,
+        totalConversions: c.totalConversions || 0,
+        totalAdSpend: c.totalAdSpend || 0,
         totalProductionCost,
         totalTrueCost,
         trueRoi
@@ -145,13 +141,12 @@ const App: React.FC = () => {
 
   const campaignsWithStats = getCampaignsWithStats();
 
-  if (!isAuthenticated) {
-    return <Login onLogin={handleLogin} />;
-  }
+  if (!isSignedIn) return <RedirectToSignIn />;
 
   return (
     <HashRouter>
       <div className="flex h-screen bg-[#0a0f1d] text-slate-200 overflow-hidden font-sans selection:bg-blue-500/30">
+
         <aside className={`${sidebarOpen ? 'w-64' : 'w-24'} transition-all duration-300 ease-in-out border-r border-slate-800 bg-slate-900 flex flex-col z-20 shadow-2xl relative`}>
           <div className="p-8 flex items-center gap-4 border-b border-slate-800">
             <div className="bg-gradient-to-br from-blue-500 to-blue-700 p-2.5 rounded-2xl shadow-2xl shadow-blue-500/30 flex-shrink-0">
@@ -229,5 +224,11 @@ const SidebarItem: React.FC<{ icon: React.ReactNode, label: string, to: string, 
     </Link>
   );
 };
+
+const App: React.FC = () => (
+  <ClerkWrapper>
+    <AppInner />
+  </ClerkWrapper>
+);
 
 export default App;
