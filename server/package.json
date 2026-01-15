@@ -12,7 +12,11 @@
     "node-fetch": "^2.6.11",
     "@clerk/clerk-sdk-node": "^5.11.0",
     "@google/genai": "^1.35.0",
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.1",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
+    "zod": "^3.22.4",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
     "mocha": "^10.2.0",

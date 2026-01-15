@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const { GoogleGenAI, Type } = (() => {
   try {
     return require('@google/genai');
@@ -15,13 +17,90 @@ const ga4Service = require('./services/ga4Service');
 const geminiService = require('./services/geminiService');
 const { Pool } = require('pg');
 const { Clerk } = require('@clerk/clerk-sdk-node');
+const logger = require('./src/logger');
+const { campaignSchema, pixelSchema, hubspotSyncSchema, ga4Schema, advisorSchema } = require('./src/validation');
 
 // Clerk backend client (requires CLERK_SECRET_KEY)
 const clerkClient = new Clerk({ apiKey: process.env.CLERK_SECRET_KEY });
 
 const app = express();
-app.use(cors());
+
+// Security middleware
+app.use(helmet());
+
+// CORS configuration - lockdown to localhost and Replit
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.REPLIT_ORIGIN || null
+].filter(Boolean);
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
+
+// Rate limiting
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  message: 'Too many requests, please try again later'
+});
+
+const pixelLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  skip: (req) => req.method === 'GET' // Only count POST
+});
+
+app.use(globalLimiter);
+
+// Request logging
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.path}`);
+  next();
+});
+
+// Request validation middleware
+function validateRequest(schema) {
+  return (req, res, next) => {
+    try {
+      const validated = schema.parse(req.body);
+      req.body = validated;
+      next();
+    } catch (err) {
+      logger.warn(`Validation error on ${req.path}`, { errors: err.errors });
+      res.status(400).json({ error: 'Invalid request', details: err.errors });
+    }
+  };
+}
+
+// Subscription enforcement middleware (checks if user is Pro for premium features)
+async function requireProSubscription(req, res, next) {
+  const userId = req.auth?.userId;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query('SELECT subscription FROM settings WHERE user_id = $1', [userId]);
+    const settings = rows[0];
+    const isPro = settings && settings.subscription && settings.subscription.plan === 'PRO';
+
+    if (!isPro) {
+      return res.status(403).json({ error: 'Pro subscription required' });
+    }
+    next();
+  } catch (err) {
+    logger.error('Subscription check failed', err);
+    res.status(500).json({ error: 'Failed to verify subscription' });
+  } finally {
+    client.release();
+  }
+}
 
 // Clerk auth middleware
 async function clerkAuth(req, res, next) {
@@ -70,7 +149,7 @@ const { fetchGa4Metrics } = ga4Service;
 // --- Routes ---
 
 // Tracking redirect: increments clicks and redirects to campaign destination (Supabase/Postgres)
-app.get('/api/t/:campaignId', async (req, res) => {
+app.get('/api/t/:campaignId', globalLimiter, async (req, res) => {
   const client = await pool.connect();
   try {
     const { campaignId } = req.params;
@@ -91,7 +170,7 @@ app.get('/api/t/:campaignId', async (req, res) => {
     const destination = campaign.destination_url || '/';
     res.redirect(destination);
   } catch (err) {
-    console.error('Tracking redirect failed', err);
+    logger.error('Tracking redirect failed', err);
     res.status(500).send('Tracking failed');
   } finally {
     client.release();
@@ -99,11 +178,10 @@ app.get('/api/t/:campaignId', async (req, res) => {
 });
 
 // Pixel endpoint: receive form submissions and link to campaign via cookie (writes to Postgres)
-app.post('/api/pixel', async (req, res) => {
+app.post('/api/pixel', pixelLimiter, validateRequest(pixelSchema), async (req, res) => {
   const client = await pool.connect();
   try {
-    const { email } = req.body || {};
-    if (!email) return res.status(400).json({ error: 'Missing email' });
+    const { email } = req.body;
 
     const cookieHeader = req.headers.cookie || '';
     const cookies = Object.fromEntries(cookieHeader.split(';').map(c => {
@@ -129,7 +207,7 @@ app.post('/api/pixel', async (req, res) => {
 
     res.json({ ok: true, customer, linked_campaign: campaign ? campaign.id : null });
   } catch (err) {
-    console.error('Pixel endpoint failed', err);
+    logger.error('Pixel endpoint failed', err);
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
@@ -281,13 +359,12 @@ app.post('/api/scheduler/run', clerkAuth, async (req, res) => {
 });
 
 // Create a new campaign. Requires user_id in body (from Clerk useAuth on client).
-app.post('/api/campaigns', clerkAuth, async (req, res) => {
+app.post('/api/campaigns', clerkAuth, validateRequest(campaignSchema), async (req, res) => {
   const client = await pool.connect();
   try {
     const payload = req.body;
     const userId = req.auth?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    if (!payload || !payload.name || !payload.destination_url) return res.status(400).json({ error: 'Missing name or destination_url' });
 
     // Generate unique tracking_id
     let trackingId;
@@ -299,9 +376,10 @@ app.post('/api/campaigns', clerkAuth, async (req, res) => {
 
     const insertQ = `INSERT INTO campaigns (user_id, name, utm_source, utm_medium, utm_campaign, tracking_id, destination_url, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,now()) RETURNING *`;
     const { rows } = await client.query(insertQ, [userId, payload.name, payload.utm_source || null, payload.utm_medium || null, payload.utm_campaign || null, trackingId, payload.destination_url]);
+    logger.info(`Campaign created: ${rows[0].id}`);
     res.status(201).json(rows[0]);
   } catch (err) {
-    console.error('Create campaign failed', err);
+    logger.error('Create campaign failed', err);
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
@@ -358,10 +436,44 @@ app.get('/api/admin/scheduler_runs', clerkAuth, async (req, res) => {
 // Start server and scheduler (only when run directly)
 if (require.main === module) {
   const port = process.env.PORT || 4000;
-  app.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
+  const server = app.listen(port, () => {
+    logger.info(`Server listening on port ${port}`);
     // start scheduler with the Postgres pool & a small runner function to compute ROIs
     scheduler.start(pool, { fetchGa4Metrics: ga4Service.fetchGa4Metrics });
+  });
+
+  // Graceful shutdown
+  const handleShutdown = async (signal) => {
+    logger.info(`Received ${signal}, shutting down gracefully...`);
+    server.close(async () => {
+      logger.info('HTTP server closed');
+      try {
+        await pool.end();
+        logger.info('Database pool closed');
+      } catch (err) {
+        logger.error('Error closing database pool', err);
+      }
+      process.exit(0);
+    });
+
+    // Force shutdown after 10 seconds
+    setTimeout(() => {
+      logger.error('Forced shutdown');
+      process.exit(1);
+    }, 10000);
+  };
+
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
+
+  process.on('uncaughtException', (err) => {
+    logger.error('Uncaught exception', err);
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled rejection', { reason, promise });
+    process.exit(1);
   });
 }
 
