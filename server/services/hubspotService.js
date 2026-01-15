@@ -156,4 +156,43 @@ async function refreshHubSpotToken(userId, client) {
   }
 }
 
-module.exports = { getHubSpotToken, fetchDealsAmountForTrackingId, fetchHubSpotDeals, refreshHubSpotToken };
+module.exports = { getHubSpotToken, fetchDealsAmountForTrackingId, fetchHubSpotDeals, refreshHubSpotToken, exchangeHubSpotAuthCode };
+
+// OAuth: exchange authorization code for access token
+async function exchangeHubSpotAuthCode(code) {
+  if (!code) throw new Error('Missing authorization code');
+
+  const clientId = process.env.HUBSPOT_CLIENT_ID;
+  const clientSecret = process.env.HUBSPOT_CLIENT_SECRET;
+  const redirectUri = `${process.env.API_BASE_URL || 'http://localhost:4000'}/api/integrations/hubspot/oauth-callback`;
+
+  if (!clientId || !clientSecret) {
+    throw new Error('Missing HubSpot OAuth credentials in environment');
+  }
+
+  const params = new URLSearchParams();
+  params.append('grant_type', 'authorization_code');
+  params.append('client_id', clientId);
+  params.append('client_secret', clientSecret);
+  params.append('redirect_uri', redirectUri);
+  params.append('code', code);
+
+  const tokenRes = await fetch('https://api.hubapi.com/oauth/v1/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString()
+  });
+
+  if (!tokenRes.ok) {
+    const b = await tokenRes.text().catch(() => '');
+    throw new Error(`HubSpot token exchange failed: ${tokenRes.status} ${b}`);
+  }
+
+  const tokenBody = await tokenRes.json();
+  return {
+    access_token: tokenBody.access_token,
+    refresh_token: tokenBody.refresh_token,
+    expires_in: tokenBody.expires_in,
+    hub_id: tokenBody.hub_id
+  };
+}

@@ -17,6 +17,7 @@ const AccountSettings: React.FC<SettingsProps> = ({ settings, setSettings }) => 
   const [connecting, setConnecting] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const isPro = settings.subscription.plan === 'PRO';
 
   const backendEndpoint = settings.custom_domain ? `https://${settings.custom_domain}/api/pixel` : 'https://your-backend.example.com/api/pixel';
@@ -48,15 +49,33 @@ const AccountSettings: React.FC<SettingsProps> = ({ settings, setSettings }) => 
     }));
   };
 
-  const handleConnect = (type: 'hubspot' | 'ga4') => {
+  const handleConnect = async (type: 'hubspot' | 'ga4') => {
     setConnecting(type);
-    setTimeout(() => {
-      setSettings(prev => ({
-        ...prev,
-        [type === 'hubspot' ? 'is_hubspot_connected' : 'is_ga4_connected']: true
-      }));
+    try {
+      // Get auth URL from backend
+      const endpoint = type === 'hubspot' ? '/api/integrations/hubspot/auth-url' : '/api/integrations/ga4/auth-url';
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${/* get token from Clerk */}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to get ${type} auth URL`);
+        setConnecting(null);
+        return;
+      }
+
+      const { authUrl } = await response.json();
+      
+      // Redirect to OAuth provider
+      window.location.href = authUrl;
+    } catch (err) {
+      console.error(`Connection failed for ${type}:`, err);
       setConnecting(null);
-    }, 1500);
+    }
   };
 
   const handleUpgrade = () => {
@@ -64,6 +83,37 @@ const AccountSettings: React.FC<SettingsProps> = ({ settings, setSettings }) => 
       ...prev,
       subscription: { ...prev.subscription, plan: 'PRO' }
     }));
+  };
+
+  const saveSettings = async () => {
+    setSaveStatus('saving');
+    try {
+      const response = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${/* get token from Clerk */}`
+        },
+        body: JSON.stringify({
+          report_email: settings.report_email,
+          custom_domain: settings.custom_domain,
+          integrations: settings.integrations
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save settings');
+      }
+
+      const saved = await response.json();
+      setSettings(prev => ({ ...prev, ...saved }));
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (err) {
+      console.error('Settings save failed:', err);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    }
   };
 
   return (
@@ -78,6 +128,17 @@ const AccountSettings: React.FC<SettingsProps> = ({ settings, setSettings }) => 
           <TabBtn active={activeTab === 'connectors'} onClick={() => setActiveTab('connectors')} label="Bridges" />
           <TabBtn active={activeTab === 'setup'} onClick={() => setActiveTab('setup')} label="Foundry DNA" />
         </div>
+        {saveStatus !== 'idle' && (
+          <div className={`px-6 py-3 rounded-2xl text-[10px] font-bold uppercase tracking-widest transition-all ${
+            saveStatus === 'saved' ? 'bg-emerald-600/10 border border-emerald-600/20 text-emerald-400' : 
+            saveStatus === 'saving' ? 'bg-blue-600/10 border border-blue-600/20 text-blue-400' :
+            'bg-red-600/10 border border-red-600/20 text-red-400'
+          }`}>
+            {saveStatus === 'saving' && '⏳ Saving...'}
+            {saveStatus === 'saved' && '✓ Settings saved'}
+            {saveStatus === 'error' && '✗ Save failed'}
+          </div>
+        )}
       </div>
 
       {activeTab === 'account' && (

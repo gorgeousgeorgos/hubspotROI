@@ -19,6 +19,27 @@ export const nativeStorage = {
     return (data as Campaign[]) || null;
   },
 
+  // Save single campaign with asset_ids
+  saveCampaign: async (userId: string, campaign: Campaign) => {
+    const payload = { ...campaign, user_id: userId };
+    const { data, error } = await supabase.from('campaigns').upsert([payload], { onConflict: 'id' }).select().single();
+    if (error) throw error;
+    return data as Campaign;
+  },
+
+  // Update campaign asset associations
+  updateCampaignAssets: async (userId: string, campaignId: string, assetIds: string[]) => {
+    const { data, error } = await supabase
+      .from('campaigns')
+      .update({ asset_ids: assetIds })
+      .eq('id', campaignId)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as Campaign;
+  },
+
   saveStats: async (userId: string, data: Stat[]) => {
     const payload = data.map(d => ({ ...d, user_id: userId }));
     await supabase.from('stats').upsert(payload, { onConflict: 'id' });
@@ -27,6 +48,15 @@ export const nativeStorage = {
     const { data, error } = await supabase.from('stats').select('*').eq('user_id', userId);
     if (error) throw error;
     return (data as Stat[]) || null;
+  },
+
+  // Validate stat before saving (ensure ad_spend > 0 for meaningful ROI)
+  saveStat: async (userId: string, stat: Stat) => {
+    if (stat.ad_spend < 0) throw new Error('Ad spend cannot be negative');
+    const payload = { ...stat, user_id: userId };
+    const { data, error } = await supabase.from('stats').upsert([payload], { onConflict: 'id' }).select().single();
+    if (error) throw error;
+    return data as Stat;
   },
 
   saveAssets: async (userId: string, data: MarketingAsset[]) => {

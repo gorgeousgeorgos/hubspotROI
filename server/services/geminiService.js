@@ -1,19 +1,23 @@
-const { GoogleGenAI, Type } = (() => {
+const { GoogleGenerativeAI } = (() => {
   try {
-    return require('@google/genai');
+    return require('@google/generative-ai');
   } catch (e) {
     return {};
   }
 })();
 
-if (!GoogleGenAI) {
-  console.warn('server/services/geminiService: @google/genai not installed — install in server to enable intelligence reports');
+if (!GoogleGenerativeAI) {
+  console.warn('server/services/geminiService: @google/generative-ai not installed — install in server to enable intelligence reports');
 }
 
 const getIntelligenceReport = async (campaigns = []) => {
-  if (!GoogleGenAI) throw new Error('Missing @google/genai - install on the server to enable intelligence reports');
+  if (!GoogleGenerativeAI) throw new Error('Missing @google/generative-ai - install on the server to enable intelligence reports');
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.API_KEY });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  if (!apiKey) throw new Error('Missing GEMINI_API_KEY environment variable');
+
+  const client = new GoogleGenerativeAI({ apiKey });
+  const model = client.getGenerativeModel({ model: 'gemini-2.0-pro-exp-02-05' });
 
   const dataSummary = campaigns.map((c) => ({
     name: c.name,
@@ -36,30 +40,49 @@ Provide a sophisticated response following this logic:
 2. Priorities: Identify EXACTLY 3 highest-leverage actions.
 3. Asset Advice: Identify specific creative types that are DRAINERS or WINNERS.
 4. Platform Advice: Give specific feedback on channel mix.
-5. Holistic Advice: Is the creative strategy matching the spend velocity?`;
+5. Holistic Advice: Is the creative strategy matching the spend velocity?
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
-    contents: prompt,
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          summary: { type: Type.STRING },
-          topPriorities: { type: Type.ARRAY, items: { type: Type.STRING } },
-          assetStrategy: { type: Type.OBJECT },
-          channelInsights: { type: Type.STRING },
-          campaignAdvice: { type: Type.STRING }
-        },
-        required: ['summary', 'topPriorities', 'assetStrategy', 'channelInsights', 'campaignAdvice']
+Return ONLY valid JSON matching this schema:
+{
+  "summary": string,
+  "topPriorities": [string, string, string],
+  "assetStrategy": { "refresh": [string], "scale": [string] },
+  "channelInsights": string,
+  "campaignAdvice": string
+}`;
+
+  try {
+    const response = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            summary: { type: 'STRING' },
+            topPriorities: { type: 'ARRAY', items: { type: 'STRING' } },
+            assetStrategy: {
+              type: 'OBJECT',
+              properties: {
+                refresh: { type: 'ARRAY', items: { type: 'STRING' } },
+                scale: { type: 'ARRAY', items: { type: 'STRING' } }
+              }
+            },
+            channelInsights: { type: 'STRING' },
+            campaignAdvice: { type: 'STRING' }
+          },
+          required: ['summary', 'topPriorities', 'assetStrategy', 'channelInsights', 'campaignAdvice']
+        }
       }
-    }
-  });
+    });
 
-  const text = response.text;
-  if (!text) throw new Error('Intelligence engine timeout.');
-  return JSON.parse(text);
+    const text = response.response.text();
+    if (!text) throw new Error('Intelligence engine timeout.');
+    return JSON.parse(text);
+  } catch (err) {
+    console.error('Gemini API error:', err?.message || err);
+    throw new Error(`Intelligence generation failed: ${err?.message || err}`);
+  }
 };
 
 module.exports = { getIntelligenceReport };

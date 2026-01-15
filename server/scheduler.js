@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const hubspotService = require('./services/hubspotService');
 const geminiService = require('./services/geminiService');
+const notificationService = require('./services/notificationService');
 
 // Run every Sunday at 09:00 (server clock)
 const SUNDAY_CRON = '0 9 * * 0';
@@ -120,6 +121,15 @@ function start(pool, { fetchGa4Metrics } = {}) {
         } catch (err) {
           console.warn('Scheduler: failed to build report data for user', userId, err?.message || err);
         }
+      }
+
+      // Process user notifications (emails, Slack alerts)
+      try {
+        console.log('Scheduler: processing notifications');
+        const notifResult = await notificationService.processNotifications(client);
+        console.log('Scheduler: notifications completed', notifResult);
+      } catch (err) {
+        console.warn('Scheduler: notification processing failed', err?.message || err);
       }
 
       // mark run success

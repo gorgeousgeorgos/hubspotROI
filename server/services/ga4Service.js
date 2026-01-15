@@ -80,4 +80,77 @@ async function testMeasurementProtocol(measurementId, apiSecret) {
   }
 }
 
-module.exports = { fetchGa4Metrics, getGa4CredsForUser, testMeasurementProtocol };
+module.exports = { fetchGa4Metrics, getGa4CredsForUser, testMeasurementProtocol, exchangeGa4AuthCode, refreshGa4Token };
+
+// OAuth: exchange Google authorization code for access token
+async function exchangeGa4AuthCode(code) {
+  if (!code) throw new Error('Missing authorization code');
+
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = `${process.env.API_BASE_URL || 'http://localhost:4000'}/api/integrations/ga4/oauth-callback`;
+
+  if (!clientId || !clientSecret) {
+    throw new Error('Missing Google OAuth credentials in environment');
+  }
+
+  const params = new URLSearchParams();
+  params.append('code', code);
+  params.append('client_id', clientId);
+  params.append('client_secret', clientSecret);
+  params.append('redirect_uri', redirectUri);
+  params.append('grant_type', 'authorization_code');
+
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString()
+  });
+
+  if (!tokenRes.ok) {
+    const b = await tokenRes.text().catch(() => '');
+    throw new Error(`Google token exchange failed: ${tokenRes.status} ${b}`);
+  }
+
+  const tokenBody = await tokenRes.json();
+  return {
+    access_token: tokenBody.access_token,
+    refresh_token: tokenBody.refresh_token,
+    expires_in: tokenBody.expires_in
+  };
+}
+
+// Refresh GA4 access token using refresh token
+async function refreshGa4Token(refreshToken) {
+  if (!refreshToken) throw new Error('Missing refresh token');
+
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    throw new Error('Missing Google OAuth credentials in environment');
+  }
+
+  const params = new URLSearchParams();
+  params.append('client_id', clientId);
+  params.append('client_secret', clientSecret);
+  params.append('refresh_token', refreshToken);
+  params.append('grant_type', 'refresh_token');
+
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString()
+  });
+
+  if (!tokenRes.ok) {
+    const b = await tokenRes.text().catch(() => '');
+    throw new Error(`GA4 token refresh failed: ${tokenRes.status} ${b}`);
+  }
+
+  const tokenBody = await tokenRes.json();
+  return {
+    access_token: tokenBody.access_token,
+    expires_in: tokenBody.expires_in
+  };
+}

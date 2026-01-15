@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS campaigns (
   utm_medium TEXT,
   utm_campaign TEXT,
   tracking_id TEXT UNIQUE,
+  destination_url TEXT,
   target_roi NUMERIC DEFAULT 2.0,
+  asset_ids TEXT[] DEFAULT '{}',
   -- Optional helpful columns for storing computed results and estimates
   estimated_ad_spend NUMERIC DEFAULT 0,
   estimated_production_cost NUMERIC DEFAULT 0,
@@ -32,7 +34,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
   revenue NUMERIC DEFAULT 0,
   last_true_roi NUMERIC,
   last_reported_at timestamptz,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
 -- Customers / Lead table
@@ -133,5 +136,15 @@ CREATE TABLE IF NOT EXISTS intel_reports (
   generated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_intel_reports_user_id ON intel_reports(user_id);
+
+-- Notification log: tracks sent emails to avoid duplicates
+CREATE TABLE IF NOT EXISTS notification_log (
+  id BIGSERIAL PRIMARY KEY,
+  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  template TEXT NOT NULL,
+  sent_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_notification_log_user_id ON notification_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_notification_log_template ON notification_log(template);
 
 -- End of migration

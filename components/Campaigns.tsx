@@ -99,6 +99,28 @@ const Campaigns: React.FC<CampaignsProps> = ({ campaigns, setCampaigns, assets, 
     }
   };
 
+  const deleteCampaign = async (campaignId: string) => {
+    if (!window.confirm('Are you sure you want to delete this campaign? This action cannot be undone.')) return;
+    
+    try {
+      const response = await fetch(`/api/campaigns/${campaignId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${/* Clerk token */}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        setCampaigns(campaigns.filter(c => c.id !== campaignId));
+      } else {
+        console.error('Failed to delete campaign');
+      }
+    } catch (err) {
+      console.error('Campaign deletion failed:', err);
+    }
+  };
+
   return (
     <div className="space-y-8 pb-20">
       <div className="flex items-center justify-between">
@@ -225,9 +247,18 @@ const Campaigns: React.FC<CampaignsProps> = ({ campaigns, setCampaigns, assets, 
               <div className="flex items-center gap-2 text-slate-600 font-black uppercase tracking-widest text-[9px]">
                 <Calendar size={12} /> {new Date(campaign.created_at).toLocaleDateString()}
               </div>
-              <a href={campaign.destination_url} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-white font-black uppercase tracking-tighter transition-colors flex items-center gap-1.5 text-[9px]">
-                OPEN <Globe size={10} />
-              </a>
+              <div className="flex items-center gap-3">
+                <a href={campaign.destination_url} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-white font-black uppercase tracking-tighter transition-colors flex items-center gap-1.5 text-[9px]">
+                  OPEN <ExternalLink size={10} />
+                </a>
+                <button 
+                  onClick={() => deleteCampaign(campaign.id)}
+                  className="text-red-500 hover:text-red-400 font-black uppercase tracking-tighter transition-colors flex items-center gap-1.5 text-[9px] p-2 hover:bg-red-500/10 rounded-lg"
+                  title="Delete campaign"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
             </div>
           </div>
         ))}
