@@ -46,6 +46,35 @@ CREATE TABLE IF NOT EXISTS customers (
 CREATE INDEX IF NOT EXISTS idx_campaigns_user_id ON campaigns(user_id);
 CREATE INDEX IF NOT EXISTS idx_campaigns_utm_campaign ON campaigns(utm_campaign);
 
+-- Stats table (daily campaign metrics from GA4)
+CREATE TABLE IF NOT EXISTS stats (
+  id TEXT PRIMARY KEY,
+  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  campaign_id TEXT,
+  revenue NUMERIC DEFAULT 0,
+  conversions INTEGER DEFAULT 0,
+  ad_spend NUMERIC DEFAULT 0,
+  date TEXT,
+  is_manual_override BOOLEAN DEFAULT FALSE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_stats_user_id ON stats(user_id);
+CREATE INDEX IF NOT EXISTS idx_stats_campaign_id ON stats(campaign_id);
+
+-- Assets table (creative/production assets)
+CREATE TABLE IF NOT EXISTS assets (
+  id TEXT PRIMARY KEY,
+  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT,
+  cost_amount NUMERIC DEFAULT 0,
+  cost_type TEXT,
+  hubspot_id TEXT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  smart_map jsonb DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_assets_user_id ON assets(user_id);
+
 -- Deals table
 CREATE TABLE IF NOT EXISTS deals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
